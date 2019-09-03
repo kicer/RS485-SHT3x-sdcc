@@ -331,11 +331,8 @@
 
 /* Interrupt numbers */
 #define AWU_IRQ 1
-#define TIM1_OVR_UIF_IRQ 11
-#define TIM2_OVR_UIF_IRQ 13
-#define TIM3_OVR_UIF_IRQ 15
-#define ADC1_EOC_IRQ 22
-#define TIM4_OVR_UIF_IRQ 23
+#define UART1_TX_IRQ 17
+#define UART1_RX_IRQ 18
 
 /*
 Interrupts:

@@ -9,16 +9,20 @@ int hw_init(void) {
      * HSI RC 16MHz --/4--> 4MHz --/8--> 512KHz
      * Refer: AN2857 Application note
      */
-    CLK_CKDIVR = 0x13;
+    CLK_CKDIVR = 0x18;
     /* close all peripheral clock */
     CLK_PCKENR1 = 0x00;
     CLK_PCKENR2 = 0x00;
 
-    /* GPIO */
+    /* GPIO output push-pull 0 */
     PA_DDR = 0xFF;
     PB_DDR = 0xFF;
     PC_DDR = 0xFF;
     PD_DDR = 0xFF;
+    PA_CR1 = 0xFF;
+    PB_CR1 = 0xFF;
+    PC_CR1 = 0xFF;
+    PD_CR1 = 0xFF;
     PA_ODR = 0x00;
     PB_ODR = 0x00;
     PC_ODR = 0x00;
@@ -56,11 +60,29 @@ int hw_sleep(int sec) {
 }
 
 int read_user_key(void) {
-    return 1;
+    int ack = 0;
+    /* input with pull-up */
+    PORT(PD, DDR) &= ~PIN4;
+    PORT(PD, CR1) |= PIN4;
+    if((PORT(PD, IDR) & PIN4)==0) ack = 1;
+    /* output push-pull 0 */
+    PORT(PD, DDR) |= PIN4;
+    PORT(PD, CR1) |= PIN4;
+    PORT(PD, ODR) &= ~PIN4;
+    return ack;
 }
 
 int read_fast_mode(void) {
-    return 0;
+    int ack = 0;
+    /* input with pull-up */
+    PORT(PD, DDR) &= ~PIN3;
+    PORT(PD, CR1) |= PIN3;
+    if((PORT(PD, IDR) & PIN3)==0) ack = 1;
+    /* output push-pull 0 */
+    PORT(PD, DDR) |= PIN3;
+    PORT(PD, CR1) |= PIN3;
+    PORT(PD, ODR) &= ~PIN3;
+    return ack;
 }
 
 int flash_read_config(uint8_t *data, int size) {
@@ -107,19 +129,20 @@ int sensor_read(int sensor_type, uint8_t *data, int size) {
     return 0;
 }
 
+
+/* #####################  <main>  ##################### */
 volatile uint8_t g_address = 0;
 volatile uint8_t g_lcd = 0;
 volatile uint8_t g_rf = 1;
 volatile uint8_t g_sensor = 0;
-volatile uint8_t g_fast = 30;
+volatile uint8_t g_fast = 3;
 volatile uint8_t g_xslow = 2;
 
 void main(void) {
     uint8_t ticks = 60;
 
-    /* Ax L? R? S? Fx Xn*/
+    /* Ax L? R? Sx Fx Xn*/
     uint8_t bytes_cfg[6];
-
 
     /* 硬件相关初始化 */
     hw_init();
@@ -149,7 +172,6 @@ void main(void) {
     sensor_init(g_sensor);
     rf_init(g_rf);
 
-    ticks = 5;
     PORT(PB, DDR) |= PIN5;
     PORT(PB, CR1) |= PIN5;
     while(1) {
@@ -163,6 +185,34 @@ void main(void) {
     }
 }
 
+void uart1_rx_cb(uint8_t ch) {
+    assert_param(ch);
+}
+
 void awu_isr(void) __interrupt(AWU_IRQ) {
     AWU_CSR = AWU_CSR;
+}
+
+void uart_tx_isr(void) __interrupt(UART1_TX_IRQ) {
+}
+
+void uart_rx_isr(void) __interrupt(UART1_RX_IRQ) {
+    const uint16_t UART1_IT_RXNE = 0x0255;
+    uint16_t UART1_IT = UART1_IT_RXNE;
+    /* Get the UART1 IT index */
+    uint8_t itpos = (uint8_t)((uint8_t)1 << (uint8_t)((uint8_t)UART1_IT & (uint8_t)0x0F));
+    /* Get the UART1 IT index */
+    uint8_t itmask1 = (uint8_t)((uint8_t)UART1_IT >> (uint8_t)4);
+    /* Set the IT mask*/
+    uint8_t itmask2 = (uint8_t)((uint8_t)1 << itmask1);
+    /* Get the UART1_IT enable bit status*/
+    uint8_t enablestatus = (uint8_t)((uint8_t)UART1_CR2 & itmask2);
+    /* Check the status of the specified UART1 interrupt*/
+    if(((UART1_SR & itpos) != (uint8_t)0x00) && enablestatus) {
+        /* Interrupt occurred */
+        if(1) {
+            uint8_t ch = ((uint8_t)UART1_DR);
+            uart1_rx_cb(ch);
+        }
+    }
 }
