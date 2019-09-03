@@ -41,6 +41,15 @@
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
 /* Public functions ----------------------------------------------------------*/
+#include "board.h"
+extern void sys_ticks_cb(void);
+extern int sys_event_trigger(int);
+extern int uart1_tx_data(void);
+extern void uart1_rx_cb(uint8_t);
+extern void gpioAExti_cb(uint8_t);
+extern void gpioBExti_cb(uint8_t);
+extern void gpioCExti_cb(uint8_t);
+extern void gpioDExti_cb(uint8_t);
 
 #ifdef _COSMIC_
 /**
@@ -117,6 +126,7 @@ INTERRUPT_HANDLER(EXTI_PORTA_IRQHandler, 3)
   /* In order to detect unexpected events during development,
      it is recommended to set a breakpoint on the following instruction.
   */
+  gpioAExti_cb(GPIO_ReadInputData(GPIOA));
 }
 
 /**
@@ -129,6 +139,7 @@ INTERRUPT_HANDLER(EXTI_PORTB_IRQHandler, 4)
   /* In order to detect unexpected events during development,
      it is recommended to set a breakpoint on the following instruction.
   */
+  gpioBExti_cb(GPIO_ReadInputData(GPIOB));
 }
 
 /**
@@ -141,6 +152,7 @@ INTERRUPT_HANDLER(EXTI_PORTC_IRQHandler, 5)
   /* In order to detect unexpected events during development,
      it is recommended to set a breakpoint on the following instruction.
   */
+  gpioCExti_cb(GPIO_ReadInputData(GPIOC));
 }
 
 /**
@@ -153,6 +165,7 @@ INTERRUPT_HANDLER(EXTI_PORTD_IRQHandler, 6)
   /* In order to detect unexpected events during development,
      it is recommended to set a breakpoint on the following instruction.
   */
+  gpioDExti_cb(GPIO_ReadInputData(GPIOD));
 }
 
 /**
@@ -333,6 +346,13 @@ INTERRUPT_HANDLER(TIM1_CAP_COM_IRQHandler, 12)
     /* In order to detect unexpected events during development,
        it is recommended to set a breakpoint on the following instruction.
     */
+    int ch = uart1_tx_data();
+    if(ch != -1) {
+        UART1_SendData8((uint8_t)ch);
+    } else {
+        UART1_ITConfig(UART1_IT_TXE, DISABLE);
+        sys_event_trigger(EVENT_SEND_PKG);
+    }
  }
 
 /**
@@ -345,6 +365,9 @@ INTERRUPT_HANDLER(TIM1_CAP_COM_IRQHandler, 12)
     /* In order to detect unexpected events during development,
        it is recommended to set a breakpoint on the following instruction.
     */
+    if( UART1_GetITStatus(UART1_IT_RXNE) == SET) {
+        uart1_rx_cb(UART1_ReceiveData8());
+    }
  }
 #endif /* (STM8S208) || (STM8S207) || (STM8S103) || (STM8S001) || (STM8S903) || (STM8AF62Ax) || (STM8AF52Ax) */
 
@@ -489,6 +512,9 @@ INTERRUPT_HANDLER(TIM6_UPD_OVF_TRG_IRQHandler, 23)
   /* In order to detect unexpected events during development,
      it is recommended to set a breakpoint on the following instruction.
   */
+  sys_ticks_cb();
+  /* Cleat Interrupt Pending bit */
+  TIM4_ClearITPendingBit(TIM4_IT_UPDATE);
  }
 #endif /* (STM8S903) || (STM8AF622x)*/
 

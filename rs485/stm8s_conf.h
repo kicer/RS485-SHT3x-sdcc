@@ -92,6 +92,7 @@
 
 /* Exported types ------------------------------------------------------------*/
 /* Exported constants --------------------------------------------------------*/
+#define try_param(x) ((void)x)
 /* Uncomment the line below to expanse the "assert_param" macro in the
    Standard Peripheral Library drivers code */
 #define USE_FULL_ASSERT    (0) 

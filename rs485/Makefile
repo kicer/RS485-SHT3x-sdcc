@@ -3,7 +3,7 @@ DEVICE=stm8s103f3
 DEFINES=STM8S103
 
 # apps in used
-APPS = gpio uart1 clk
+APPS = gpio uart1 clk tim4 flash wwdg exti
 
 ## A directory for common include files
 COMMONDIR = bsp

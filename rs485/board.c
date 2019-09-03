@@ -228,6 +228,13 @@ int board_init(void) {
     return 0;
 }
 
+void gpioAExti_cb(uint8_t val) {
+    try_param(val);
+}
+
+void gpioBExti_cb(uint8_t val) {
+    try_param(val);
+}
 
 void gpioCExti_cb(uint8_t val) {
     uint32_t cnt = bmqMaxCount;

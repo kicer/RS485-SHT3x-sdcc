@@ -45,7 +45,7 @@ typedef struct {
     uint8_t chksum;
 } EECFG;
 
-#define MAGIC_CODE   0x3B
+#define MAGIC_CODE   ((uint8_t)0x3B)
 #define UID32(p)     (*((uint32_t *)(p)))
 
 int eBlockId = -1;
@@ -87,7 +87,7 @@ static int eeprom_init_config(void) {
         eBlock.head = MAGIC_CODE;
         UID32(eBlock.idx) = 0;
         eBlock.size = 0;
-        eBlock.chksum = 0xFF-MAGIC_CODE;
+        eBlock.chksum = (uint8_t)(0xFF-MAGIC_CODE);
     }
     return 0;
 }
