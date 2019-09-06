@@ -1,34 +1,36 @@
 ## Set Mcu Type
 DEVICE=stm8s103f3
-DEFINES=STM8S103
-
-# apps in used
-APPS = gpio uart1 clk tim4 flash wwdg exti
+CPU=STM8S103
 
 ## A directory for common include files
-COMMONDIR = bsp
+BSP = bsp
 
 ## Get program name from enclosing directory name
-PROGRAM = $(lastword $(subst /, ,$(CURDIR)))
+PROGRAM = objects/$(lastword $(subst /, ,$(CURDIR)))
 
-SOURCES=$(wildcard *.c $(addprefix $(COMMONDIR)/src/stm8s_,$(addsuffix .c,$(APPS))))
+SOURCES=$(wildcard src/*.c)
 OBJECTS=$(SOURCES:.c=.rel)
 
-HEADERS=$(wildcard *.h $(COMMONDIR)/inc/*.h)
+HEADERS=$(wildcard src/inc/*.h $(BSP)/inc/*.h)
 
 CC = /Developer/sdcc/bin/sdcc
 PROGRAMMER = stlinkv2
 FLASHER = /Developer/sdcc/bin/stm8flash
 FACTORYOPT = /Developer/sdcc/stm8s103_opt_factory_defaults.bin
+MKLIB = scripts/compile-s.sh
+CPULIB = $(BSP)/lib/$(CPU).lib
 
-CPPFLAGS = -I$(COMMONDIR)/inc -I.
-CFLAGS = --Werror --std-sdcc99 -mstm8 -D$(DEFINES)
+CPPFLAGS = -I$(BSP)/inc -Isrc/inc
+CFLAGS = --Werror --std-sdcc99 -mstm8 -D$(CPU)
 LDFLAGS = -lstm8 -mstm8 --out-fmt-ihx
 
 .PHONY: all clean flash factory
 
-$(PROGRAM).ihx: $(OBJECTS)
+$(PROGRAM).ihx: $(OBJECTS) $(CPULIB)
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -o $@
+
+$(CPULIB):
+	$(MKLIB) $(CPU)
 
 %.rel : %.c $(HEADERS)
 	$(CC) $(CFLAGS) $(CPPFLAGS) -c -o $@ $<
