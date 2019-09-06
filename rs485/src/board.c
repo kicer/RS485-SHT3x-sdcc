@@ -41,16 +41,16 @@ static void config_read_state(DevState *pst) {
 }
 
 static void sensor_read_cb(void) {
-    modbus_reg_write(&g_reg_sensor, 1, SENS_T(234)); /* T */
-    modbus_reg_write(&g_reg_sensor, 2, SENS_RH(567)); /* RH */
-    uint16_t cnt = modbus_reg_read(&g_reg_sensor, 3);
-    modbus_reg_write(&g_reg_sensor, 3, cnt+1); /* RH */
+    modbus_reg_write(g_reg_sensor, 1, SENS_T(234)); /* T */
+    modbus_reg_write(g_reg_sensor, 2, SENS_RH(567)); /* RH */
+    uint16_t cnt = modbus_reg_read(g_reg_sensor, 3);
+    modbus_reg_write(g_reg_sensor, 3, cnt+1); /* RH */
 }
 
 static void config_update_powerCnt(void) {
     gDevSt.powerCnt += 1;
     if(eeprom_write_config(&gDevSt, sizeof(DevState)) == 0) {
-        modbus_reg_write(&g_reg_info, 2, gDevSt.powerCnt);
+        modbus_reg_write(g_reg_info, 2, gDevSt.powerCnt);
     }
 }
 
@@ -60,15 +60,23 @@ static void uart1_recv_pkg_cb(void) {
     uint16_t size = (Rx1Buffer[4]<<8)+Rx1Buffer[5];
     uint8_t pkgSend[32];
     if(cmd == 0x03) {
+        uint16_t *preg = 0;
         if(modbus_reg_check(g_reg_info, addr0, size)) {
+            preg = g_reg_info;
+        } else {
+            if(modbus_reg_check(g_reg_sensor, addr0, size)) {
+                preg = g_reg_sensor;
+            }
+        }
+        if(preg) {
             int i;
             uint32_t crc = 0xFFFF;
             pkgSend[0] = gDevSt.comAddress;
             pkgSend[1] = cmd;
             pkgSend[2] = (size*2)&0xFF;
             for(i=0; i<size; i++) {
-                uint16_t offset = addr0+size-modbus_reg_addr0(g_reg_info);
-                uint16_t val = modbus_reg_read(g_reg_info, offset);
+                uint16_t offset = addr0+i-modbus_reg_addr0(preg);
+                uint16_t val = modbus_reg_read(preg, offset);
                 pkgSend[3+i*2] = (val>>8)&0xFF;
                 pkgSend[3+i*2+1] = val&0xFF;
             }
@@ -84,18 +92,18 @@ static void uart1_recv_pkg_cb(void) {
 }
 
 static void modbus_regs_init(void) {
-    modbus_reg_init(&g_reg_info, 0x0000, 4);
-    modbus_reg_init(&g_reg_sensor, 0x0100, 4);
+    modbus_reg_init(g_reg_info, 0x0000, 4);
+    modbus_reg_init(g_reg_sensor, 0x0100, 4);
     /* init info's reg */
-    modbus_reg_write(&g_reg_info, 0, gDevSt.comAddress);
-    modbus_reg_write(&g_reg_info, 1, gDevSt.comBaud);
-    modbus_reg_write(&g_reg_info, 2, gDevSt.powerCnt);
-    modbus_reg_write(&g_reg_info, 3, 0x0010); /* regx address */
+    modbus_reg_write(g_reg_info, 0, gDevSt.comAddress);
+    modbus_reg_write(g_reg_info, 1, gDevSt.comBaud);
+    modbus_reg_write(g_reg_info, 2, gDevSt.powerCnt);
+    modbus_reg_write(g_reg_info, 3, 0x0100); /* regx address */
     /* init sensor's reg */
-    modbus_reg_write(&g_reg_sensor, 0, (gDevSt.comAddress<<8)+4);
-    modbus_reg_write(&g_reg_sensor, 1, SENS_T(0)); /* T */
-    modbus_reg_write(&g_reg_sensor, 2, SENS_RH(0)); /* RH */
-    modbus_reg_write(&g_reg_sensor, 3, 0); /* sensor success readCnt */
+    modbus_reg_write(g_reg_sensor, 0, (gDevSt.comAddress<<8)+4);
+    modbus_reg_write(g_reg_sensor, 1, SENS_T(0)); /* T */
+    modbus_reg_write(g_reg_sensor, 2, SENS_RH(0)); /* RH */
+    modbus_reg_write(g_reg_sensor, 3, 0); /* sensor success readCnt */
 }
 
 int board_init(void) {
@@ -104,7 +112,6 @@ int board_init(void) {
     config_read_state(&gDevSt);
     /* init com */
     uart1_init(gDevSt.comBaud);
-    uart1_send("hello",5);
     /* modbus init */
     modbus_regs_init();
     /* register event */
