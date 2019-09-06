@@ -351,7 +351,7 @@ INTERRUPT_HANDLER(TIM1_CAP_COM_IRQHandler, 12)
         UART1_SendData8((uint8_t)ch);
     } else {
         UART1_ITConfig(UART1_IT_TXE, DISABLE);
-        sys_event_trigger(EVENT_SEND_PKG);
+        sys_event_trigger(EVENT_UART1_SEND_PKG);
     }
  }
 

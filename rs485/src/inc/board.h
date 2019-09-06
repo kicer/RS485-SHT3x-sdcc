@@ -2,16 +2,15 @@
 #define _BOARD_H_
 
 
-#define UART_RX_MAXSIZE    64
+#define EVENT_UART1_RECV_PKG     1
+#define EVENT_UART1_SEND_PKG     2
 
-#define EVENT_RECV_PKG     1
-#define EVENT_SEND_PKG     2
-
-#define MAGIC_CODE        19890818
+#define MAGIC_CODE        0x19890818
 
 typedef struct {
-    uint8_t  com_address;
-    uint32_t com_baud;
+    uint8_t  comAddress;
+    uint32_t comBaud;
+    uint16_t powerCnt;
     uint32_t magic;
 } DevState;
 

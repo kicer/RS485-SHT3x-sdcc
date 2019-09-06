@@ -21,7 +21,7 @@ MKLIB = scripts/compile-s.sh
 CPULIB = $(BSP)/lib/$(CPU).lib
 
 CPPFLAGS = -I$(BSP)/inc -Isrc/inc
-CFLAGS = --Werror --std-sdcc99 -mstm8 -D$(CPU)
+CFLAGS = --std-sdcc99 -mstm8 -D$(CPU)
 LDFLAGS = -lstm8 -mstm8 --out-fmt-ihx
 
 .PHONY: all clean flash factory
