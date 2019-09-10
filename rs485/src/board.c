@@ -120,26 +120,38 @@ static void config_update_powerCnt(void) {
 }
 
 static void config_sync_all(void) {
-    if(gDevSt.comAddress == MODBUS_REG_Addr) {
-        if(gDevSt.comBaud == MODBUS_REG_Baud) {
-            if(gDevSt.autoReport == MODBUS_REG_Report) {
-                if(gDevSt.measSeconds == MODBUS_REG_MeasSec) {
-                    return;
-                } else gDevSt.measSeconds = MODBUS_REG_MeasSec;
-            } else gDevSt.autoReport = MODBUS_REG_Report;
-        } else gDevSt.comBaud = MODBUS_REG_Baud;
-    } else gDevSt.comAddress = MODBUS_REG_Addr;
-    if(eeprom_write_config(&gDevSt, sizeof(DevState)) == 0) {
-        WWDG_SWReset();
+    int sync = 0;
+    if(gDevSt.comAddress != MODBUS_REG_Addr) {
+        gDevSt.comAddress = MODBUS_REG_Addr;
+        sync += 1;
+    }
+    if(gDevSt.comBaud != MODBUS_REG_Baud) {
+        gDevSt.comBaud = MODBUS_REG_Baud;
+        sync += 1;
+    }
+    if(gDevSt.autoReport != MODBUS_REG_Report) {
+        gDevSt.autoReport = MODBUS_REG_Report;
+        sync += 1;
+    }
+    if(gDevSt.measSeconds != MODBUS_REG_MeasSec) {
+        gDevSt.measSeconds = MODBUS_REG_MeasSec;
+        sync += 1;
+    }
+    if(sync > 0) {
+        if(eeprom_write_config(&gDevSt, sizeof(DevState)) == 0) {
+            WWDG_SWReset();
+        }
     }
 }
 
 static void uart1_recv_pkg_cb(void) {
+    int i;
     uint8_t pkgSend[32];
     uint8_t cmd = Rx1Buffer[1];
     uint16_t addr0 = ((uint16_t)Rx1Buffer[2]<<8)+Rx1Buffer[3];
     uint16_t size = ((uint16_t)Rx1Buffer[4]<<8)+Rx1Buffer[5];
     uint16_t *preg = 0;
+    uint16_t crc, value, offset;
     if(cmd == 0x06) size = 1;
     if(modbus_reg_check(g_reg_info, addr0, size)) {
         preg = g_reg_info;
@@ -147,35 +159,42 @@ static void uart1_recv_pkg_cb(void) {
         preg = g_reg_sensor;
     } else return; /* invalid address */
     if(cmd == 0x03) {
-        int i;
-        uint32_t crc = 0xFFFF;
         pkgSend[0] = gDevSt.comAddress;
         pkgSend[1] = cmd;
         pkgSend[2] = (size*2)&0xFF;
         for(i=0; i<size; i++) {
-            uint16_t offset = addr0+i-modbus_reg_addr0(preg);
-            uint16_t val = modbus_reg(preg, offset);
-            pkgSend[3+i*2] = (val>>8)&0xFF;
-            pkgSend[3+i*2+1] = val&0xFF;
+            offset = addr0+i-modbus_reg_addr0(preg);
+            value = modbus_reg(preg, offset);
+            pkgSend[3+i*2] = (value>>8)&0xFF;
+            pkgSend[3+i*2+1] = value&0xFF;
         }
+        crc = 0xFFFF;
         for(i=0; i<size*2+3; i++) {
             crc = crc16_update(crc, pkgSend[i]);
         }
-        pkgSend[i] = (crc>>8)&0xFF;
-        pkgSend[i+1] = crc&0xFF;
-        uart1_flush_output(); /* force output */
-        uart1_send(pkgSend, size*2+5);
-    } else if(cmd == 0x06) {
-        uint16_t offset = addr0-modbus_reg_addr0(preg);
-        uint16_t value = ((uint16_t)Rx1Buffer[4]<<8)+Rx1Buffer[5];
-        if(preg == g_reg_info) {
+    } else if(preg == g_reg_info) {
+        /* info-reg support write */
+        offset = addr0-modbus_reg_addr0(preg);
+        if(cmd == 0x06) { /* single word */
+            value = ((uint16_t)Rx1Buffer[4]<<8)+Rx1Buffer[5];
             modbus_reg(preg, offset) = value;
-            uart1_flush_output(); /* force output */
-            uart1_send(Rx1Buffer, 8);
-            sys_task_reg_alarm(100, config_sync_all); /* 100ms */
+        } else if(cmd == 0x10) { /* multi words */
+            for(i=0; i<size; i++) {
+                value = ((uint16_t)Rx1Buffer[7+2*i]<<8)+Rx1Buffer[8+2*i];
+                modbus_reg(preg, offset+i) = value;
+            }
+        } else return; /* invalid cmd */
+        crc = 0xFFFF;
+        for(i=0; i<6; i++) {
+            pkgSend[i] = Rx1Buffer[i];
+            crc = crc16_update(crc, pkgSend[i]);
         }
-    } else if(cmd == 0x10) {
-    }
+        sys_task_reg_alarm(100, config_sync_all); /* 100ms */
+    } else return; /* invalid pkg */
+    pkgSend[i] = (crc>>8)&0xFF;
+    pkgSend[i+1] = crc&0xFF;
+    uart1_flush_output(); /* force output */
+    uart1_send(Rx1Buffer, i+2);
 }
 
 static void modbus_regs_init(void) {
