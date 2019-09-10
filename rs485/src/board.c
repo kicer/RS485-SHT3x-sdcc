@@ -147,7 +147,7 @@ int board_init(void) {
     /* register event */
     sys_task_reg_timer(5000, sensor_read); /* read sensor per 5s */
     sys_task_reg_event(EVENT_UART1_RECV_PKG, uart1_recv_pkg_cb); /* recv_pkg event callback */
-    //sys_task_reg_alarm(60000, config_update_powerCnt); /* update powerCnt after power.1min */
+    sys_task_reg_alarm(60000, config_update_powerCnt); /* update powerCnt after power.1min */
     return 0;
 }
 

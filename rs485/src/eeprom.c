@@ -3,6 +3,14 @@
 
 static int eeprom_init_config(void);
 
+#ifdef _SDCC_
+    static uint8_t fp_ram[256];
+    static void (*IN_RAM_FLASH_EraseBlock)(uint16_t,uint8_t);
+    static void (*IN_RAM_FLASH_ProgramBlock)(uint16_t,uint8_t,uint8_t,uint8_t *); 
+#else
+    #define IN_RAM_FLASH_EraseBlock     FLASH_EraseBlock
+    #define IN_RAM_FLASH_ProgramBlock   FLASH_ProgramBlock
+#endif /* _SDCC_ */
 
 int eeprom_init(void) {
 #ifdef _COSMIC_
@@ -22,6 +30,17 @@ int eeprom_init(void) {
          (void PointerAttr*)&__address__FLASH_ProgramBlock,
          (int)&__size__FLASH_ProgramBlock);
 #endif /*_RAISONANCE_*/
+
+#ifdef _SDCC_
+    for(int i=0; i<128; i++) {
+        fp_ram[i] = ((uint8_t *)FLASH_EraseBlock)[i];
+    }
+    for(int i=0; i<128; i++) {
+        fp_ram[128+i] = ((uint8_t *)FLASH_ProgramBlock)[i];
+    }
+    IN_RAM_FLASH_EraseBlock = (void (*)(uint16_t,uint8_t))fp_ram;
+    IN_RAM_FLASH_ProgramBlock = (void (*)(uint16_t,uint8_t,uint8_t,uint8_t *))(fp_ram+128);
+#endif /*_SDCC_ */
 
     /* Define flash programming Time*/
     FLASH_SetProgrammingTime(FLASH_PROGRAMTIME_STANDARD);
@@ -107,7 +126,7 @@ int eeprom_write_config(void *cfg, int size) {
         chksum += MAGIC_CODE + eBlock.idx[0]+eBlock.idx[1]+eBlock.idx[2]+eBlock.idx[3] + eBlock.size;
         eBlock.chksum = 0xFF-chksum;
         /* This function is executed from RAM */
-        FLASH_ProgramBlock(blk_id, FLASH_MEMTYPE_DATA, FLASH_PROGRAMMODE_STANDARD, (uint8_t *)(&eBlock));
+        IN_RAM_FLASH_ProgramBlock(blk_id, FLASH_MEMTYPE_DATA, FLASH_PROGRAMMODE_STANDARD, (uint8_t *)(&eBlock));
         eBlockId = blk_id;
         return 0;
     }
