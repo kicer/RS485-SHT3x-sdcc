@@ -7,29 +7,30 @@
 
 
 /* device info regMap
- * +------+------+---------+--------+----------+------+
- * |  0   |  1   |   2     |   3    |    4     |   5  |
- * +------+------+---------+--------+----------+------+
- * | Addr | Baud | MeasSec | Report | PowerCnt | Reg0 |
- * +------+------+---------+--------+----------+------+
+ * +------+------+------+---------+--------+----------+------+
+ * |  0   |  1   |  2   |    3    |   4    |    5     |   6  |
+ * +------+------+------+---------+--------+----------+------+
+ * | ILoc | Addr | Baud | MeasSec | Report | PowerCnt | RLoc |
+ * +------+------+------+---------+--------+----------+------+
  */
-uint16_t g_reg_info[modbus_REGSIZE(6)];
-#define MODBUS_REG_Addr      modbus_reg(g_reg_info, 0)
-#define MODBUS_REG_Baud      modbus_reg(g_reg_info, 1)
-#define MODBUS_REG_MeasSec   modbus_reg(g_reg_info, 2)
-#define MODBUS_REG_Report    modbus_reg(g_reg_info, 3)
-#define MODBUS_REG_PowerCnt  modbus_reg(g_reg_info, 4)
-#define MODBUS_REG_Rge0      modbus_reg(g_reg_info, 5)
+uint16_t g_reg_info[modbus_REGSIZE(7)];
+#define MODBUS_CFG_ILoc      modbus_reg(g_reg_info, 0)
+#define MODBUS_CFG_Addr      modbus_reg(g_reg_info, 1)
+#define MODBUS_CFG_Baud      modbus_reg(g_reg_info, 2)
+#define MODBUS_CFG_MeasSec   modbus_reg(g_reg_info, 3)
+#define MODBUS_CFG_Report    modbus_reg(g_reg_info, 4)
+#define MODBUS_CFG_PowerCnt  modbus_reg(g_reg_info, 5)
+#define MODBUS_CFG_RLoc      modbus_reg(g_reg_info, 6)
 
 /* sensor data regMap
  * +------+------+------+---------+
  * | 0100 | 0101 | 0102 |   0103  |
  * +------+------+------+---------+
- * | ALen | Temp | Humi | SuccCnt |
+ * | RLoc | Temp | Humi | SuccCnt |
  * +------+------+------+---------+
  */
 uint16_t g_reg_sensor[modbus_REGSIZE(4)];
-#define MODBUS_REG_ALen      modbus_reg(g_reg_sensor, 0)
+#define MODBUS_REG_RLoc      modbus_reg(g_reg_sensor, 0)
 #define MODBUS_REG_Temp      modbus_reg(g_reg_sensor, 1)
 #define MODBUS_REG_Humi      modbus_reg(g_reg_sensor, 2)
 #define MODBUS_REG_SuccCnt   modbus_reg(g_reg_sensor, 3)
@@ -115,26 +116,26 @@ static void sensor_read(void) {
 static void config_update_powerCnt(void) {
     gDevSt.powerCnt += 1;
     if(eeprom_write_config(&gDevSt, sizeof(DevState)) == 0) {
-        MODBUS_REG_PowerCnt = gDevSt.powerCnt;
+        MODBUS_CFG_PowerCnt = gDevSt.powerCnt;
     }
 }
 
 static void config_sync_all(void) {
     int sync = 0;
-    if(gDevSt.comAddress != MODBUS_REG_Addr) {
-        gDevSt.comAddress = MODBUS_REG_Addr;
+    if(gDevSt.comAddress != MODBUS_CFG_Addr) {
+        gDevSt.comAddress = MODBUS_CFG_Addr;
         sync += 1;
     }
-    if(gDevSt.comBaud != MODBUS_REG_Baud) {
-        gDevSt.comBaud = MODBUS_REG_Baud;
+    if(gDevSt.comBaud != MODBUS_CFG_Baud) {
+        gDevSt.comBaud = MODBUS_CFG_Baud;
         sync += 1;
     }
-    if(gDevSt.autoReport != MODBUS_REG_Report) {
-        gDevSt.autoReport = MODBUS_REG_Report;
+    if(gDevSt.autoReport != MODBUS_CFG_Report) {
+        gDevSt.autoReport = MODBUS_CFG_Report;
         sync += 1;
     }
-    if(gDevSt.measSeconds != MODBUS_REG_MeasSec) {
-        gDevSt.measSeconds = MODBUS_REG_MeasSec;
+    if(gDevSt.measSeconds != MODBUS_CFG_MeasSec) {
+        gDevSt.measSeconds = MODBUS_CFG_MeasSec;
         sync += 1;
     }
     if(sync > 0) {
@@ -198,17 +199,18 @@ static void uart1_recv_pkg_cb(void) {
 }
 
 static void modbus_regs_init(void) {
-    modbus_reg_init(g_reg_info, 0x0000, 6);
+    modbus_reg_init(g_reg_info, 0x0000, 7);
     modbus_reg_init(g_reg_sensor, 0x0100, 4);
     /* init info's reg */
-    MODBUS_REG_Addr = gDevSt.comAddress;
-    MODBUS_REG_Baud = gDevSt.comBaud;
-    MODBUS_REG_MeasSec = gDevSt.measSeconds;
-    MODBUS_REG_Report = gDevSt.autoReport;
-    MODBUS_REG_PowerCnt = gDevSt.powerCnt;
-    MODBUS_REG_Rge0 = 0x0100; /* regx address */
+    MODBUS_CFG_ILoc = 0x0000;
+    MODBUS_CFG_Addr = gDevSt.comAddress;
+    MODBUS_CFG_Baud = gDevSt.comBaud;
+    MODBUS_CFG_MeasSec = gDevSt.measSeconds;
+    MODBUS_CFG_Report = gDevSt.autoReport;
+    MODBUS_CFG_PowerCnt = gDevSt.powerCnt;
+    MODBUS_CFG_RLoc = 0x0100; /* regx address */
     /* init sensor's reg */
-    MODBUS_REG_ALen = ((uint16_t)gDevSt.comAddress<<8)+4;
+    MODBUS_REG_RLoc = 0x0100;
     MODBUS_REG_Temp = 0;
     MODBUS_REG_Humi = 0;
     MODBUS_REG_SuccCnt = 0;
