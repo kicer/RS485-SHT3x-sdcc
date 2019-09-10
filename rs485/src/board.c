@@ -48,7 +48,7 @@ static void config_read_state(DevState *pst) {
         pst->comAddress = 1;
         pst->comBaud = 9600;
         pst->measSeconds = 5;
-        pst->autoReport = 0;
+        pst->autoReport = 1;
         pst->powerCnt = 0;
     } else {
         if(pst->comBaud == 0) {
@@ -84,9 +84,13 @@ static void sensor_read_cb(void) {
         modbus_reg_write(g_reg_sensor, 2, rh);
         uint16_t cnt = modbus_reg_read(g_reg_sensor, 3);
         modbus_reg_write(g_reg_sensor, 3, cnt+1);
-        if(gDevSt.autoReport) uart1_send(g_reg_sensor, sizeof(g_reg_sensor));
+        if(gDevSt.autoReport) { /* todo:dataFormat? */
+            uart1_flush_output();
+            uart1_send(g_reg_sensor, sizeof(g_reg_sensor));
+        }
     }
 }
+
 static void sensor_read(void) {
     int ack_err = 0;
     I2c_StartCondition();
@@ -138,6 +142,8 @@ static void uart1_recv_pkg_cb(void) {
             uart1_flush_output(); /* force output */
             uart1_send(pkgSend, size*2+5);
         }
+    } else if(cmd == 0x06) {
+    } else if(cmd == 0x10) {
     }
 }
 
@@ -159,7 +165,6 @@ static void modbus_regs_init(void) {
 }
 
 int board_init(void) {
-    I2c_Init();
     /* read config */
     eeprom_init();
     config_read_state(&gDevSt);
@@ -167,6 +172,8 @@ int board_init(void) {
     uart1_init(gDevSt.comBaud);
     /* modbus init */
     modbus_regs_init();
+    /* sensor init */
+    I2c_Init();
     /* register event */
     sys_task_reg_timer(gDevSt.measSeconds*1000, sensor_read); /* read sens */
     sys_task_reg_event(EVENT_UART1_RECV_PKG, uart1_recv_pkg_cb); /* recv_pkg event callback */
@@ -194,6 +201,7 @@ void uart1_rx_cb(uint8_t ch) {
     /* modbus: <addr> 03 <reg_addr_2> <reg_size_2> <chksum_2> */
     static uint8_t idx = 0;
     static uint8_t chksum = 0;
+    static uint16_t len = 0;
     static uint16_t crc = 0xFFFF;
     Rx1Buffer[idx] = ch;
     switch(idx) {
@@ -202,29 +210,35 @@ void uart1_rx_cb(uint8_t ch) {
             crc = crc16_update(0xFFFF, ch);
             break;
         case 1:
-            if(ch == 0x03) {
-                crc = crc16_update(crc, ch);
-                idx+=1;
+            crc = crc16_update(crc, ch);
+            idx+=1;
+            if((ch==0x03)||(ch==0x06)) {
+                len = 8;
+            } else if(ch == 0x10) {
+                len = 9; /* +n */
             } else {
                 idx = 0;
-            }
-            break;
-        case 6:
-            if((crc&0xFF) == ch) {
-                idx += 1;
-            } else {
-                idx = 0;
-            }
-            break;
-        case 7:
-            idx = 0;
-            if(((crc>>8)&0xFF) == ch) {
-                sys_event_trigger(EVENT_UART1_RECV_PKG);
             }
             break;
         default:
-            crc = crc16_update(crc, ch);
-            idx += 1;
+            if((len>8) && (idx==6)) {
+                len += ch; /* cmd=0x10, fix length */
+            }
+            if(idx == len-2) {
+                if((crc&0xFF) == ch) {
+                    idx += 1;
+                } else {
+                    idx = 0;
+                }
+            } else if(idx == len-1) {
+                idx = 0;
+                if(((crc>>8)&0xFF) == ch) {
+                    sys_event_trigger(EVENT_UART1_RECV_PKG);
+                }
+            } else {
+                crc = crc16_update(crc, ch);
+                idx += 1;
+            }
             break;
     }
 }
