@@ -29,10 +29,10 @@ uint16_t g_reg_info[modbus_REGSIZE(6)];
  * +------+------+------+---------+
  */
 uint16_t g_reg_sensor[modbus_REGSIZE(4)];
-#define MODBUS_REG_ALen      modbus_reg(g_reg_info, 0)
-#define MODBUS_REG_Temp      modbus_reg(g_reg_info, 1)
-#define MODBUS_REG_Humi      modbus_reg(g_reg_info, 2)
-#define MODBUS_REG_SuccCnt   modbus_reg(g_reg_info, 3)
+#define MODBUS_REG_ALen      modbus_reg(g_reg_sensor, 0)
+#define MODBUS_REG_Temp      modbus_reg(g_reg_sensor, 1)
+#define MODBUS_REG_Humi      modbus_reg(g_reg_sensor, 2)
+#define MODBUS_REG_SuccCnt   modbus_reg(g_reg_sensor, 3)
 
 __IO uint8_t Rx1Buffer[32];
 __IO DevState gDevSt;
@@ -194,11 +194,11 @@ static void uart1_recv_pkg_cb(void) {
     pkgSend[i] = (crc>>8)&0xFF;
     pkgSend[i+1] = crc&0xFF;
     uart1_flush_output(); /* force output */
-    uart1_send(Rx1Buffer, i+2);
+    uart1_send(pkgSend, i+2);
 }
 
 static void modbus_regs_init(void) {
-    modbus_reg_init(g_reg_info, 0x0000, 4);
+    modbus_reg_init(g_reg_info, 0x0000, 6);
     modbus_reg_init(g_reg_sensor, 0x0100, 4);
     /* init info's reg */
     MODBUS_REG_Addr = gDevSt.comAddress;
