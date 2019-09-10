@@ -6,8 +6,22 @@
 #include "modbus.h"
 
 
-/* modbus regs */
-uint16_t g_reg_info[modbus_REGSIZE(4)];
+/* device info regMap
+ * +------+------+---------+--------+----------+------+
+ * |  0   |  1   |   2     |   3    |    4     |   5  |
+ * +------+------+---------+--------+----------+------+
+ * | Addr | Baud | measSec | Report | PowerCnt | Reg0 |
+ * +------+------+---------+--------+----------+------+
+ */
+uint16_t g_reg_info[modbus_REGSIZE(6)];
+
+/* sensor data regMap
+ * +------+------+------+---------+
+ * | 0100 | 0101 | 0102 |   0103  |
+ * +------+------+------+---------+
+ * | ALen | Temp | Humi | SuccCnt |
+ * +------+------+------+---------+
+ */
 uint16_t g_reg_sensor[modbus_REGSIZE(4)];
 
 __IO uint8_t Rx1Buffer[16];
@@ -33,7 +47,13 @@ static void config_read_state(DevState *pst) {
         pst->magic = MAGIC_CODE;
         pst->comAddress = 1;
         pst->comBaud = 9600;
+        pst->measSeconds = 5;
+        pst->autoReport = 0;
         pst->powerCnt = 0;
+    } else {
+        if(pst->comBaud == 0) {
+            pst->comBaud = 115200;
+        }
     }
 }
 
@@ -64,6 +84,7 @@ static void sensor_read_cb(void) {
         modbus_reg_write(g_reg_sensor, 2, rh);
         uint16_t cnt = modbus_reg_read(g_reg_sensor, 3);
         modbus_reg_write(g_reg_sensor, 3, cnt+1);
+        if(gDevSt.autoReport) uart1_send(g_reg_sensor, sizeof(g_reg_sensor));
     }
 }
 static void sensor_read(void) {
@@ -126,8 +147,10 @@ static void modbus_regs_init(void) {
     /* init info's reg */
     modbus_reg_write(g_reg_info, 0, gDevSt.comAddress);
     modbus_reg_write(g_reg_info, 1, gDevSt.comBaud);
-    modbus_reg_write(g_reg_info, 2, gDevSt.powerCnt);
-    modbus_reg_write(g_reg_info, 3, 0x0100); /* regx address */
+    modbus_reg_write(g_reg_info, 2, gDevSt.measSeconds);
+    modbus_reg_write(g_reg_info, 3, gDevSt.autoReport);
+    modbus_reg_write(g_reg_info, 4, gDevSt.powerCnt);
+    modbus_reg_write(g_reg_info, 5, 0x0100); /* regx address */
     /* init sensor's reg */
     modbus_reg_write(g_reg_sensor, 0, ((uint16_t)gDevSt.comAddress<<8)+4);
     modbus_reg_write(g_reg_sensor, 1, 0); /* T */
@@ -145,7 +168,7 @@ int board_init(void) {
     /* modbus init */
     modbus_regs_init();
     /* register event */
-    sys_task_reg_timer(5000, sensor_read); /* read sensor per 5s */
+    sys_task_reg_timer(gDevSt.measSeconds*1000, sensor_read); /* read sens */
     sys_task_reg_event(EVENT_UART1_RECV_PKG, uart1_recv_pkg_cb); /* recv_pkg event callback */
     sys_task_reg_alarm(60000, config_update_powerCnt); /* update powerCnt after power.1min */
     return 0;

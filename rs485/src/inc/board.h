@@ -10,6 +10,8 @@
 typedef struct {
     uint8_t  comAddress;
     uint32_t comBaud;
+    uint8_t  autoReport;
+    uint16_t measSeconds;
     uint16_t powerCnt;
     uint32_t magic;
 } DevState;
