@@ -10,9 +10,6 @@
 uint16_t g_reg_info[modbus_REGSIZE(4)];
 uint16_t g_reg_sensor[modbus_REGSIZE(4)];
 
-#define SENS_T(t)    (t<-500?0:500+t)
-#define SENS_RH(rh)  (rh)
-
 __IO uint8_t Rx1Buffer[16];
 __IO DevState gDevSt;
 
@@ -40,11 +37,45 @@ static void config_read_state(DevState *pst) {
     }
 }
 
+#include "i2c_sw_master.h"
+#define I2C_WRITE   ((uint8_t)0)
+#define I2C_READ    ((uint8_t)1)
+#define SHT3x_ADDR  ((uint8_t)(0x44<<1))
 static void sensor_read_cb(void) {
-    modbus_reg_write(g_reg_sensor, 1, SENS_T(234)); /* T */
-    modbus_reg_write(g_reg_sensor, 2, SENS_RH(567)); /* RH */
-    uint16_t cnt = modbus_reg_read(g_reg_sensor, 3);
-    modbus_reg_write(g_reg_sensor, 3, cnt+1); /* RH */
+    int ack_err = 0;
+    uint8_t rxByte[6];
+    I2c_StartCondition();
+    ack_err += I2c_WriteByte(SHT3x_ADDR+I2C_READ);
+    if(ack_err == 0) {
+        ack_err += I2c_ReadByte(rxByte+0, 0);
+        ack_err += I2c_ReadByte(rxByte+1, 0);
+        ack_err += I2c_ReadByte(rxByte+2, 0);
+        ack_err += I2c_ReadByte(rxByte+3, 0);
+        ack_err += I2c_ReadByte(rxByte+4, 0);
+        ack_err += I2c_ReadByte(rxByte+5, 1);
+        I2c_StopCondition();
+    }
+    if(ack_err == 0) {
+        /* T = t/10-100
+         * RH = rh/10 */
+        uint16_t t = (uint32_t)1750*(((uint16_t)rxByte[0]<<8)+rxByte[1])/65535+550;
+        uint16_t rh = (uint32_t)1000*(((uint16_t)rxByte[3]<<8)+rxByte[4])/65535;
+        modbus_reg_write(g_reg_sensor, 1, t);
+        modbus_reg_write(g_reg_sensor, 2, rh);
+        uint16_t cnt = modbus_reg_read(g_reg_sensor, 3);
+        modbus_reg_write(g_reg_sensor, 3, cnt+1);
+    }
+}
+static void sensor_read(void) {
+    int ack_err = 0;
+    I2c_StartCondition();
+    ack_err += I2c_WriteByte(SHT3x_ADDR+I2C_WRITE);
+    ack_err += I2c_WriteByte(0x24);
+    ack_err += I2c_WriteByte(0x00);
+    I2c_StopCondition();
+    if(ack_err == 0) {
+        sys_task_reg_alarm(15, sensor_read_cb);
+    }
 }
 
 static void config_update_powerCnt(void) {
@@ -56,17 +87,15 @@ static void config_update_powerCnt(void) {
 
 static void uart1_recv_pkg_cb(void) {
     uint8_t cmd = Rx1Buffer[1];
-    uint16_t addr0 = (Rx1Buffer[2]<<8)+Rx1Buffer[3];
-    uint16_t size = (Rx1Buffer[4]<<8)+Rx1Buffer[5];
+    uint16_t addr0 = ((uint16_t)Rx1Buffer[2]<<8)+Rx1Buffer[3];
+    uint16_t size = ((uint16_t)Rx1Buffer[4]<<8)+Rx1Buffer[5];
     uint8_t pkgSend[32];
     if(cmd == 0x03) {
         uint16_t *preg = 0;
         if(modbus_reg_check(g_reg_info, addr0, size)) {
             preg = g_reg_info;
-        } else {
-            if(modbus_reg_check(g_reg_sensor, addr0, size)) {
-                preg = g_reg_sensor;
-            }
+        } else if(modbus_reg_check(g_reg_sensor, addr0, size)) {
+            preg = g_reg_sensor;
         }
         if(preg) {
             int i;
@@ -100,13 +129,14 @@ static void modbus_regs_init(void) {
     modbus_reg_write(g_reg_info, 2, gDevSt.powerCnt);
     modbus_reg_write(g_reg_info, 3, 0x0100); /* regx address */
     /* init sensor's reg */
-    modbus_reg_write(g_reg_sensor, 0, (gDevSt.comAddress<<8)+4);
-    modbus_reg_write(g_reg_sensor, 1, SENS_T(0)); /* T */
-    modbus_reg_write(g_reg_sensor, 2, SENS_RH(0)); /* RH */
+    modbus_reg_write(g_reg_sensor, 0, ((uint16_t)gDevSt.comAddress<<8)+4);
+    modbus_reg_write(g_reg_sensor, 1, 0); /* T */
+    modbus_reg_write(g_reg_sensor, 2, 0); /* RH */
     modbus_reg_write(g_reg_sensor, 3, 0); /* sensor success readCnt */
 }
 
 int board_init(void) {
+    I2c_Init();
     /* read config */
     eeprom_init();
     config_read_state(&gDevSt);
@@ -115,9 +145,9 @@ int board_init(void) {
     /* modbus init */
     modbus_regs_init();
     /* register event */
-    sys_task_reg_timer(5000, sensor_read_cb); /* read sensor per 5s */
+    sys_task_reg_timer(5000, sensor_read); /* read sensor per 5s */
     sys_task_reg_event(EVENT_UART1_RECV_PKG, uart1_recv_pkg_cb); /* recv_pkg event callback */
-    sys_task_reg_alarm(60000, config_update_powerCnt); /* update powerCnt after power.1min */
+    //sys_task_reg_alarm(60000, config_update_powerCnt); /* update powerCnt after power.1min */
     return 0;
 }
 
