@@ -10,10 +10,16 @@
  * +------+------+---------+--------+----------+------+
  * |  0   |  1   |   2     |   3    |    4     |   5  |
  * +------+------+---------+--------+----------+------+
- * | Addr | Baud | measSec | Report | PowerCnt | Reg0 |
+ * | Addr | Baud | MeasSec | Report | PowerCnt | Reg0 |
  * +------+------+---------+--------+----------+------+
  */
 uint16_t g_reg_info[modbus_REGSIZE(6)];
+#define MODBUS_REG_Addr      modbus_reg(g_reg_info, 0)
+#define MODBUS_REG_Baud      modbus_reg(g_reg_info, 1)
+#define MODBUS_REG_MeasSec   modbus_reg(g_reg_info, 2)
+#define MODBUS_REG_Report    modbus_reg(g_reg_info, 3)
+#define MODBUS_REG_PowerCnt  modbus_reg(g_reg_info, 4)
+#define MODBUS_REG_Rge0      modbus_reg(g_reg_info, 5)
 
 /* sensor data regMap
  * +------+------+------+---------+
@@ -23,6 +29,10 @@ uint16_t g_reg_info[modbus_REGSIZE(6)];
  * +------+------+------+---------+
  */
 uint16_t g_reg_sensor[modbus_REGSIZE(4)];
+#define MODBUS_REG_ALen      modbus_reg(g_reg_info, 0)
+#define MODBUS_REG_Temp      modbus_reg(g_reg_info, 1)
+#define MODBUS_REG_Humi      modbus_reg(g_reg_info, 2)
+#define MODBUS_REG_SuccCnt   modbus_reg(g_reg_info, 3)
 
 __IO uint8_t Rx1Buffer[16];
 __IO DevState gDevSt;
@@ -80,10 +90,9 @@ static void sensor_read_cb(void) {
          * RH = rh/10 */
         uint16_t t = (uint32_t)1750*(((uint16_t)rxByte[0]<<8)+rxByte[1])/65535+550;
         uint16_t rh = (uint32_t)1000*(((uint16_t)rxByte[3]<<8)+rxByte[4])/65535;
-        modbus_reg_write(g_reg_sensor, 1, t);
-        modbus_reg_write(g_reg_sensor, 2, rh);
-        uint16_t cnt = modbus_reg_read(g_reg_sensor, 3);
-        modbus_reg_write(g_reg_sensor, 3, cnt+1);
+        MODBUS_REG_Temp = t;
+        MODBUS_REG_Humi = rh;
+        MODBUS_REG_SuccCnt = 1+MODBUS_REG_SuccCnt;
         if(gDevSt.autoReport) { /* todo:dataFormat? */
             uart1_flush_output();
             uart1_send(g_reg_sensor, sizeof(g_reg_sensor));
@@ -106,7 +115,7 @@ static void sensor_read(void) {
 static void config_update_powerCnt(void) {
     gDevSt.powerCnt += 1;
     if(eeprom_write_config(&gDevSt, sizeof(DevState)) == 0) {
-        modbus_reg_write(g_reg_info, 2, gDevSt.powerCnt);
+        MODBUS_REG_PowerCnt = gDevSt.powerCnt;
     }
 }
 
@@ -151,17 +160,17 @@ static void modbus_regs_init(void) {
     modbus_reg_init(g_reg_info, 0x0000, 4);
     modbus_reg_init(g_reg_sensor, 0x0100, 4);
     /* init info's reg */
-    modbus_reg_write(g_reg_info, 0, gDevSt.comAddress);
-    modbus_reg_write(g_reg_info, 1, gDevSt.comBaud);
-    modbus_reg_write(g_reg_info, 2, gDevSt.measSeconds);
-    modbus_reg_write(g_reg_info, 3, gDevSt.autoReport);
-    modbus_reg_write(g_reg_info, 4, gDevSt.powerCnt);
-    modbus_reg_write(g_reg_info, 5, 0x0100); /* regx address */
+    MODBUS_REG_Addr = gDevSt.comAddress;
+    MODBUS_REG_Baud = gDevSt.comBaud;
+    MODBUS_REG_MeasSec = gDevSt.measSeconds;
+    MODBUS_REG_Report = gDevSt.autoReport;
+    MODBUS_REG_PowerCnt = gDevSt.powerCnt;
+    MODBUS_REG_Rge0 = 0x0100; /* regx address */
     /* init sensor's reg */
-    modbus_reg_write(g_reg_sensor, 0, ((uint16_t)gDevSt.comAddress<<8)+4);
-    modbus_reg_write(g_reg_sensor, 1, 0); /* T */
-    modbus_reg_write(g_reg_sensor, 2, 0); /* RH */
-    modbus_reg_write(g_reg_sensor, 3, 0); /* sensor success readCnt */
+    MODBUS_REG_ALen = ((uint16_t)gDevSt.comAddress<<8)+4;
+    MODBUS_REG_Temp = 0;
+    MODBUS_REG_Humi = 0;
+    MODBUS_REG_SuccCnt = 0;
 }
 
 int board_init(void) {
