@@ -34,7 +34,7 @@ uint16_t g_reg_sensor[modbus_REGSIZE(4)];
 #define MODBUS_REG_Humi      modbus_reg(g_reg_info, 2)
 #define MODBUS_REG_SuccCnt   modbus_reg(g_reg_info, 3)
 
-__IO uint8_t Rx1Buffer[16];
+__IO uint8_t Rx1Buffer[32];
 __IO DevState gDevSt;
 
 
@@ -119,39 +119,61 @@ static void config_update_powerCnt(void) {
     }
 }
 
+static void config_sync_all(void) {
+    if(gDevSt.comAddress == MODBUS_REG_Addr) {
+        if(gDevSt.comBaud == MODBUS_REG_Baud) {
+            if(gDevSt.autoReport == MODBUS_REG_Report) {
+                if(gDevSt.measSeconds == MODBUS_REG_MeasSec) {
+                    return;
+                } else gDevSt.measSeconds = MODBUS_REG_MeasSec;
+            } else gDevSt.autoReport = MODBUS_REG_Report;
+        } else gDevSt.comBaud = MODBUS_REG_Baud;
+    } else gDevSt.comAddress = MODBUS_REG_Addr;
+    if(eeprom_write_config(&gDevSt, sizeof(DevState)) == 0) {
+        WWDG_SWReset();
+    }
+}
+
 static void uart1_recv_pkg_cb(void) {
+    uint8_t pkgSend[32];
     uint8_t cmd = Rx1Buffer[1];
     uint16_t addr0 = ((uint16_t)Rx1Buffer[2]<<8)+Rx1Buffer[3];
     uint16_t size = ((uint16_t)Rx1Buffer[4]<<8)+Rx1Buffer[5];
-    uint8_t pkgSend[32];
+    uint16_t *preg = 0;
+    if(cmd == 0x06) size = 1;
+    if(modbus_reg_check(g_reg_info, addr0, size)) {
+        preg = g_reg_info;
+    } else if(modbus_reg_check(g_reg_sensor, addr0, size)) {
+        preg = g_reg_sensor;
+    } else return; /* invalid address */
     if(cmd == 0x03) {
-        uint16_t *preg = 0;
-        if(modbus_reg_check(g_reg_info, addr0, size)) {
-            preg = g_reg_info;
-        } else if(modbus_reg_check(g_reg_sensor, addr0, size)) {
-            preg = g_reg_sensor;
+        int i;
+        uint32_t crc = 0xFFFF;
+        pkgSend[0] = gDevSt.comAddress;
+        pkgSend[1] = cmd;
+        pkgSend[2] = (size*2)&0xFF;
+        for(i=0; i<size; i++) {
+            uint16_t offset = addr0+i-modbus_reg_addr0(preg);
+            uint16_t val = modbus_reg(preg, offset);
+            pkgSend[3+i*2] = (val>>8)&0xFF;
+            pkgSend[3+i*2+1] = val&0xFF;
         }
-        if(preg) {
-            int i;
-            uint32_t crc = 0xFFFF;
-            pkgSend[0] = gDevSt.comAddress;
-            pkgSend[1] = cmd;
-            pkgSend[2] = (size*2)&0xFF;
-            for(i=0; i<size; i++) {
-                uint16_t offset = addr0+i-modbus_reg_addr0(preg);
-                uint16_t val = modbus_reg_read(preg, offset);
-                pkgSend[3+i*2] = (val>>8)&0xFF;
-                pkgSend[3+i*2+1] = val&0xFF;
-            }
-            for(i=0; i<size*2+3; i++) {
-                crc = crc16_update(crc, pkgSend[i]);
-            }
-            pkgSend[i] = (crc>>8)&0xFF;
-            pkgSend[i+1] = crc&0xFF;
-            uart1_flush_output(); /* force output */
-            uart1_send(pkgSend, size*2+5);
+        for(i=0; i<size*2+3; i++) {
+            crc = crc16_update(crc, pkgSend[i]);
         }
+        pkgSend[i] = (crc>>8)&0xFF;
+        pkgSend[i+1] = crc&0xFF;
+        uart1_flush_output(); /* force output */
+        uart1_send(pkgSend, size*2+5);
     } else if(cmd == 0x06) {
+        uint16_t offset = addr0-modbus_reg_addr0(preg);
+        uint16_t value = ((uint16_t)Rx1Buffer[4]<<8)+Rx1Buffer[5];
+        if(preg == g_reg_info) {
+            modbus_reg(preg, offset) = value;
+            uart1_flush_output(); /* force output */
+            uart1_send(Rx1Buffer, 8);
+            sys_task_reg_alarm(100, config_sync_all); /* 100ms */
+        }
     } else if(cmd == 0x10) {
     }
 }

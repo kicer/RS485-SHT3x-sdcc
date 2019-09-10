@@ -46,10 +46,10 @@ int sys_task_reg_event(int evt, Task foo) {
 int sys_task_destory(int task_id) {
     if(task_id <0) return -1;
     if(task_id >= TASK_STACK_SIZE) return -1;
+    _sys_task[task_id].type = TASK_NONE;
     _sys_task[task_id].foo = 0;
     _sys_task[task_id].argv = 0;
     _sys_task[task_id].ticks = 0;
-    _sys_task[task_id].type = TASK_NONE;
     return 0;
 }
 
@@ -124,7 +124,7 @@ static int Task_Register(int type, clock_t argv, Task foo) {
             _sys_task[i].argv = argv;
             _sys_task[i].ticks = argv;
             _sys_task[i].type = type;
-            return 0;
+            return i;
         }
     }
     return -1;

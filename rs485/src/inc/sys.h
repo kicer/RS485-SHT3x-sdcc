@@ -10,6 +10,9 @@ extern int sys_init(void);
 typedef unsigned long clock_t;
 typedef void (*Task)(void);
 
+/* @return: task id(0~TASK_STACK_SIZE)
+ *          -1: task full/error
+ */
 extern int sys_task_reg_timer(clock_t ms, Task foo);
 extern int sys_task_reg_alarm(clock_t ms, Task foo);
 extern int sys_task_reg_event(int evt, Task foo);
@@ -26,7 +29,9 @@ extern void sys_run(void);
 /* system uptime, unit:1ms */
 extern clock_t sys_uptime(void);
 
+/* Task Max Size */
 #define TASK_STACK_SIZE  16
+/* Reserved event-0 for systick */
 #define EVENT_SYSTICKS   0
 
 
