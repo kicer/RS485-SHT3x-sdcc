@@ -25,6 +25,8 @@ void I2c_StopCondition(void) {
 int I2c_WriteByte(uint8_t txByte) {
     int ackBit = 0;
     uint8_t mask;
+
+    /* write byte */
     for(mask = 0x80; mask > 0; mask >>= 1) {
         I2C_NOP();
         if((mask & txByte) == 0) {
@@ -38,13 +40,13 @@ int I2c_WriteByte(uint8_t txByte) {
         SCL_LOW();
     }
     I2C_LONG_NOP();
-    SDA_IN();
-    SCL_HIGH();
-    I2C_LONG_NOP();
+
+    /* read ack */
+    SDA_IN(); SCL_HIGH(); I2C_LONG_NOP();
     if(SDA_READ) ackBit = 1;
-    SCL_LOW();
-    I2C_NOP();
-    SDA_OUT();
+
+    /* to idle */
+    SCL_LOW(); I2C_NOP(); SDA_OUT();
     return ackBit;
 }
 
