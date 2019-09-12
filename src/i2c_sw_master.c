@@ -2,59 +2,53 @@
 
 void I2c_Init(void) {
     /* Note: low-level init in board.init() */
-    SDA_HIGH();
-    SCL_HIGH();
-    SDA_OUT();
-    SCL_OUT();
+    SDA_HIGH(); SDA_OUT();
+    SCL_HIGH(); SCL_OUT();
 }
 
 void I2c_StartCondition(void) {
-  SDA_HIGH();
-  SCL_HIGH();
-  I2C_NOP();
-  SDA_LOW();
-  I2C_LONG_NOP();  // hold time start condition (t_HD;STA)
-  SCL_LOW();
-  I2C_NOP();
+    /* init to high */
+    SDA_HIGH(); SCL_HIGH(); I2C_NOP();
+    /* sda high->low when scl high */
+    SDA_LOW(); I2C_LONG_NOP(); SCL_LOW();
+    I2C_NOP();
 }
 
 void I2c_StopCondition(void) {
-  SCL_LOW();
-  SDA_LOW();
-  I2C_NOP();
-  SCL_HIGH();
-  I2C_LONG_NOP();  // set-up time stop condition (t_SU;STO)
-  SDA_HIGH();
-  I2C_NOP();
+    /* init to low */
+    SCL_LOW(); SDA_LOW(); I2C_NOP();
+    /* sda low->high when scl high */
+    SCL_HIGH(); I2C_LONG_NOP(); SDA_HIGH();
+    I2C_NOP();
 }
 
 int I2c_WriteByte(uint8_t txByte) {
     int ackBit = 0;
     uint8_t mask;
     for(mask = 0x80; mask > 0; mask >>= 1) {
-        I2C_NOP();             // data hold time(t_HD;DAT)
-        // shift bit for masking (8 times)
+        I2C_NOP();
         if((mask & txByte) == 0) {
             SDA_LOW();
         } else {
             SDA_HIGH();
         }
-        I2C_NOP();             // data set-up time (t_SU;DAT)
-        SCL_HIGH();                       // generate clock pulse on SCL
-        I2C_LONG_NOP();            // SCL high time (t_HIGH)
+        I2C_NOP();
+        SCL_HIGH();
+        I2C_LONG_NOP();
         SCL_LOW();
     }
     I2C_LONG_NOP();
-    SDA_IN();                             // release SDA-line
+    SDA_IN();
     SCL_HIGH();
-    I2C_LONG_NOP();                 // data set-up time (t_SU;DAT)
-    if(SDA_READ) ackBit = 1;              // check ack from i2c slave
+    I2C_LONG_NOP();
+    if(SDA_READ) ackBit = 1;
     SCL_LOW();
-    I2C_NOP();                // wait to see byte package on scope
+    I2C_NOP();
     SDA_OUT();
-    return ackBit;                        // return error code
+    return ackBit;
 }
 
+/* for low-speed device */
 static int I2c_WaitWhileClockStreching(int timeout) {
     int busy = 0;
     if(timeout > 0) {
@@ -74,17 +68,19 @@ int I2c_ReadByte(uint8_t *rxByte, uint8_t ackBit) {
     int error = 0;
     uint8_t mask;
     *rxByte = 0x00;
-    SDA_IN();                              // release SDA-line
+
+    /* read byte */
+    SDA_IN(); 
     for(mask = 0x80; mask > 0; mask >>= 1) {
-        I2C_NOP();                // data hold time(t_HD;DAT)
-        // shift bit for masking (8 times)
-        SCL_HIGH();               // start clock on SCL-line
-        I2C_NOP();                // clock set-up time (t_SU;CLK)
-        error += I2c_WaitWhileClockStreching(I2C_CS_TICKS);// wait while clock streching
-        if(SDA_READ) *rxByte |= mask;        // read bit
+        I2C_NOP();
+        SCL_HIGH();I2C_NOP();
+        error += I2c_WaitWhileClockStreching(I2C_CS_TICKS);
+        if(SDA_READ) *rxByte |= mask;
         SCL_LOW();
     }
-    I2C_LONG_NOP();                // data hold time(t_HD;DAT)
+    I2C_LONG_NOP();
+
+    /* send ack */
     if(ackBit) { /* NACK */
         SDA_OUT();
         SDA_HIGH();
@@ -92,11 +88,9 @@ int I2c_ReadByte(uint8_t *rxByte, uint8_t ackBit) {
         SDA_OUT();
         SDA_LOW();
     }
-    I2C_NOP();                  // data set-up time (t_SU;DAT)
-    SCL_HIGH();                            // clk #9 for ack
-    I2C_LONG_NOP();                 // SCL high time (t_HIGH)
-    SCL_LOW();
-    SDA_HIGH();                            // release SDA-line
-    I2C_LONG_NOP();                 // wait to see byte package on scope
-    return error;                          // return with no error
+    I2C_NOP(); SCL_HIGH(); I2C_LONG_NOP();
+
+    /* to idle */
+    SCL_LOW(); SDA_HIGH(); I2C_LONG_NOP();
+    return error;
 }
