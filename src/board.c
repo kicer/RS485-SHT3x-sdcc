@@ -37,6 +37,11 @@ uint16_t g_reg_sensor[modbus_REGSIZE(4)];
 
 __IO DevState gDevSt;
 
+/* T = (-?)(t.d+t.p/10);  RH = rh.d+rh.p/10 */
+#define SENSOR_DP_FORMAT  0
+/* T = t/10-100;  RH = rh/10 */
+#define SENSOR_XN_FORMAT  1
+
 
 /* ################# helper functions #################   */
 static uint16_t crc16_update(uint16_t crc, uint8_t a) {
@@ -74,7 +79,8 @@ static void config_read_state(DevState *pst) {
         pst->comAddress = 1;
         pst->comBaud = 9600;
         pst->measSeconds = 5;
-        pst->autoReport = 0;
+        pst->dataFormat = 0;
+        pst->autoReport = 1;
         pst->powerCnt = 0;
     } else {
         if(pst->comBaud == 0) {
@@ -100,8 +106,10 @@ static void config_sync_all(void) {
         gDevSt.comBaud = MODBUS_CFG_Baud;
         sync += 1;
     }
-    if(gDevSt.autoReport != MODBUS_CFG_Report) {
-        gDevSt.autoReport = MODBUS_CFG_Report;
+    uint16_t report = ((uint16_t)gDevSt.dataFormat<<8)+gDevSt.autoReport;
+    if(report != MODBUS_CFG_Report) {
+        gDevSt.dataFormat = (MODBUS_CFG_Report>>8)&0xFF;
+        gDevSt.autoReport = MODBUS_CFG_Report&0xFF;
         sync += 1;
     }
     if(gDevSt.measSeconds != MODBUS_CFG_MeasSec) {
@@ -123,7 +131,7 @@ static void modbus_regs_init(void) {
     MODBUS_CFG_Addr = gDevSt.comAddress;
     MODBUS_CFG_Baud = gDevSt.comBaud;
     MODBUS_CFG_MeasSec = gDevSt.measSeconds;
-    MODBUS_CFG_Report = gDevSt.autoReport;
+    MODBUS_CFG_Report = ((uint16_t)gDevSt.dataFormat<<8)+gDevSt.autoReport;
     MODBUS_CFG_PowerCnt = gDevSt.powerCnt;
     MODBUS_CFG_RLoc = 0x0100; /* regx address */
     /* init sensor's reg */
@@ -205,10 +213,12 @@ static void uart1_recv_pkg_cb(void) {
 #define I2C_WRITE   ((uint8_t)0)
 #define I2C_READ    ((uint8_t)1)
 #define SHT3x_ADDR  ((uint8_t)(0x44<<1))
+#define DHT12_ADDR  ((uint8_t)(0xB8))
 
 static void sensor_read_cb(void) {
     uint8_t ack_err = 0;
     uint8_t crc8,rxByte[6];
+    uint16_t t = 0, rh = 0;
     I2c_StartCondition();
     ack_err += I2c_WriteByte(SHT3x_ADDR+I2C_READ);
     if(ack_err == 0) {
@@ -227,12 +237,55 @@ static void sensor_read_cb(void) {
         ack_err += I2c_ReadByte(rxByte+5, 1);
         if(crc8 != rxByte[5]) ack_err += 1;
         I2c_StopCondition();
+        t = (uint32_t)1750*(((uint16_t)rxByte[0]<<8)+rxByte[1])/65535+550;
+        rh = (uint32_t)1000*(((uint16_t)rxByte[3]<<8)+rxByte[4])/65535;
+        if(gDevSt.dataFormat == SENSOR_DP_FORMAT) {
+            uint8_t t0 = t/10;
+            uint8_t t1 = t%10;
+            if(t0 > 100) {
+                t0 -= 100;
+            } else {
+                t0 = 100 - t0;
+                t1 = (10-t1)+0x80;
+            }
+            t = ((uint16_t)t0<<8)+t1;
+            uint8_t rh0 = rh/10;
+            uint8_t rh1 = rh%10;
+            rh = ((uint16_t)rh0<<8)+rh1;
+        }
+    }
+    if(ack_err != 0) { /* DHT12 */
+        uint16_t chksum = 0;
+        ack_err = 0;
+        I2c_StartCondition();
+        ack_err += I2c_WriteByte(DHT12_ADDR+I2C_WRITE);
+        ack_err += I2c_WriteByte(0x00);
+        I2c_StartCondition();
+        ack_err += I2c_WriteByte(DHT12_ADDR+I2C_READ);
+        for(int i=0; i<4; i++) {
+            ack_err += I2c_ReadByte(rxByte+i, 0);
+            chksum += rxByte[i];
+        }
+        ack_err += I2c_ReadByte(rxByte+4, 1);
+        I2c_StopCondition();
+        if(chksum == 0) ack_err += 1;
+        if((chksum&0xFF) != rxByte[4]) {
+            ack_err += 1;
+        } else {
+            if(gDevSt.dataFormat == SENSOR_DP_FORMAT) {
+                rh = ((uint16_t)rxByte[0]<<8)+rxByte[1];
+                t = ((uint16_t)rxByte[2]<<8)+rxByte[3];
+            } else {
+                rh = rxByte[1]+rxByte[0]*10;
+                if(rxByte[3] >= 0x80) {
+                    t = 1000-((rxByte[3]&0x7F)+rxByte[2]*10);
+                } else {
+                    t = 1000+rxByte[3]+rxByte[2]*10;
+                }
+            }
+        }
     }
     if(ack_err == 0) {
-        /* T = t/10-100
-         * RH = rh/10 */
-        uint16_t t = (uint32_t)1750*(((uint16_t)rxByte[0]<<8)+rxByte[1])/65535+550;
-        uint16_t rh = (uint32_t)1000*(((uint16_t)rxByte[3]<<8)+rxByte[4])/65535;
         MODBUS_REG_Temp = t;
         MODBUS_REG_Humi = rh;
         MODBUS_REG_SuccCnt = 1+MODBUS_REG_SuccCnt;
@@ -265,9 +318,8 @@ static void sensor_read(void) {
     ack_err += I2c_WriteByte(0x24);
     ack_err += I2c_WriteByte(0x00);
     I2c_StopCondition();
-    if(ack_err == 0) {
-        sys_task_reg_alarm(15, sensor_read_cb);
-    }
+    try_param(ack_err);
+    sys_task_reg_alarm(15, sensor_read_cb);
 }
 
 

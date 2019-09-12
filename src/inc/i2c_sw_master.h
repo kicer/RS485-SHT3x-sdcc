@@ -20,12 +20,12 @@
 #define SCL_READ   ((GPIOC->IDR&(1<<3)) != 0)
 
 #define I2C_NOP()  do {              \
-    for(uint32_t i=0; i<10; i++) {  \
+    for(uint32_t i=0; i<20; i++) {  \
         nop();                       \
     }} while(0)
 
 #define I2C_LONG_NOP()  do {         \
-    for(uint32_t i=0; i<20; i++) { \
+    for(uint32_t i=0; i<40; i++) { \
         nop();                       \
     }} while(0)
 
