@@ -35,10 +35,10 @@ uint16_t g_reg_sensor[modbus_REGSIZE(4)];
 #define MODBUS_REG_Humi      modbus_reg(g_reg_sensor, 2)
 #define MODBUS_REG_SuccCnt   modbus_reg(g_reg_sensor, 3)
 
-__IO uint8_t Rx1Buffer[32];
 __IO DevState gDevSt;
 
 
+/* ################# helper functions #################   */
 static uint16_t crc16_update(uint16_t crc, uint8_t a) {
     uint8_t i;
     crc ^= (uint16_t)a;
@@ -52,6 +52,21 @@ static uint16_t crc16_update(uint16_t crc, uint8_t a) {
     return crc;
 }
 
+static uint8_t crc8_update(uint8_t crc, uint8_t a) {
+    uint8_t bit;
+    crc ^= (uint16_t)a;
+    for (bit=8; bit>0; --bit){
+        if(crc & 0x80) {
+            crc = (crc << 1) ^ 0x0131;
+        } else {
+            crc = (crc << 1);
+        }
+    }
+    return crc;
+}
+
+
+/* ################# modbus/config functions #################   */
 static void config_read_state(DevState *pst) {
     int size = eeprom_read_config(pst);
     if((size != sizeof(DevState))||(pst->magic != MAGIC_CODE)) {
@@ -59,57 +74,12 @@ static void config_read_state(DevState *pst) {
         pst->comAddress = 1;
         pst->comBaud = 9600;
         pst->measSeconds = 5;
-        pst->autoReport = 1;
+        pst->autoReport = 0;
         pst->powerCnt = 0;
     } else {
         if(pst->comBaud == 0) {
             pst->comBaud = 115200;
         }
-    }
-}
-
-#include "i2c_sw_master.h"
-#define I2C_WRITE   ((uint8_t)0)
-#define I2C_READ    ((uint8_t)1)
-#define SHT3x_ADDR  ((uint8_t)(0x44<<1))
-static void sensor_read_cb(void) {
-    int ack_err = 0;
-    uint8_t rxByte[6];
-    I2c_StartCondition();
-    ack_err += I2c_WriteByte(SHT3x_ADDR+I2C_READ);
-    if(ack_err == 0) {
-        ack_err += I2c_ReadByte(rxByte+0, 0);
-        ack_err += I2c_ReadByte(rxByte+1, 0);
-        ack_err += I2c_ReadByte(rxByte+2, 0);
-        ack_err += I2c_ReadByte(rxByte+3, 0);
-        ack_err += I2c_ReadByte(rxByte+4, 0);
-        ack_err += I2c_ReadByte(rxByte+5, 1);
-        I2c_StopCondition();
-    }
-    if(ack_err == 0) {
-        /* T = t/10-100
-         * RH = rh/10 */
-        uint16_t t = (uint32_t)1750*(((uint16_t)rxByte[0]<<8)+rxByte[1])/65535+550;
-        uint16_t rh = (uint32_t)1000*(((uint16_t)rxByte[3]<<8)+rxByte[4])/65535;
-        MODBUS_REG_Temp = t;
-        MODBUS_REG_Humi = rh;
-        MODBUS_REG_SuccCnt = 1+MODBUS_REG_SuccCnt;
-        if(gDevSt.autoReport) { /* todo:dataFormat? */
-            uart1_flush_output();
-            uart1_send(g_reg_sensor, sizeof(g_reg_sensor));
-        }
-    }
-}
-
-static void sensor_read(void) {
-    int ack_err = 0;
-    I2c_StartCondition();
-    ack_err += I2c_WriteByte(SHT3x_ADDR+I2C_WRITE);
-    ack_err += I2c_WriteByte(0x24);
-    ack_err += I2c_WriteByte(0x00);
-    I2c_StopCondition();
-    if(ack_err == 0) {
-        sys_task_reg_alarm(15, sensor_read_cb);
     }
 }
 
@@ -144,6 +114,38 @@ static void config_sync_all(void) {
         }
     }
 }
+
+static void modbus_regs_init(void) {
+    modbus_reg_init(g_reg_info, 0x0000, 7);
+    modbus_reg_init(g_reg_sensor, 0x0100, 4);
+    /* init info's reg */
+    MODBUS_CFG_ILoc = 0x0000;
+    MODBUS_CFG_Addr = gDevSt.comAddress;
+    MODBUS_CFG_Baud = gDevSt.comBaud;
+    MODBUS_CFG_MeasSec = gDevSt.measSeconds;
+    MODBUS_CFG_Report = gDevSt.autoReport;
+    MODBUS_CFG_PowerCnt = gDevSt.powerCnt;
+    MODBUS_CFG_RLoc = 0x0100; /* regx address */
+    /* init sensor's reg */
+    MODBUS_REG_RLoc = 0x0100;
+    MODBUS_REG_Temp = 0;
+    MODBUS_REG_Humi = 0;
+    MODBUS_REG_SuccCnt = 0;
+}
+
+
+/* ################# com functions #################   */
+#define com_send(b,s) do {    \
+/* switch to uart-send mode */\
+        uart1_flush_output(); \
+        uart1_send((b), (s)); \
+    } while(0)
+
+static void uart1_send_pkg_cb(void) {
+    // switch to uart receive mode
+}
+
+__IO uint8_t Rx1Buffer[32]; /* uart1 receive buffer */
 
 static void uart1_recv_pkg_cb(void) {
     int i;
@@ -192,30 +194,84 @@ static void uart1_recv_pkg_cb(void) {
         }
         sys_task_reg_alarm(100, config_sync_all); /* 100ms */
     } else return; /* invalid pkg */
-    pkgSend[i] = (crc>>8)&0xFF;
-    pkgSend[i+1] = crc&0xFF;
-    uart1_flush_output(); /* force output */
-    uart1_send(pkgSend, i+2);
+    pkgSend[i] = crc&0xFF;
+    pkgSend[i+1] = (crc>>8)&0xFF;
+    com_send(pkgSend, i+2);
 }
 
-static void modbus_regs_init(void) {
-    modbus_reg_init(g_reg_info, 0x0000, 7);
-    modbus_reg_init(g_reg_sensor, 0x0100, 4);
-    /* init info's reg */
-    MODBUS_CFG_ILoc = 0x0000;
-    MODBUS_CFG_Addr = gDevSt.comAddress;
-    MODBUS_CFG_Baud = gDevSt.comBaud;
-    MODBUS_CFG_MeasSec = gDevSt.measSeconds;
-    MODBUS_CFG_Report = gDevSt.autoReport;
-    MODBUS_CFG_PowerCnt = gDevSt.powerCnt;
-    MODBUS_CFG_RLoc = 0x0100; /* regx address */
-    /* init sensor's reg */
-    MODBUS_REG_RLoc = 0x0100;
-    MODBUS_REG_Temp = 0;
-    MODBUS_REG_Humi = 0;
-    MODBUS_REG_SuccCnt = 0;
+
+/* ################# sensor functions #################   */
+#include "i2c_sw_master.h"
+#define I2C_WRITE   ((uint8_t)0)
+#define I2C_READ    ((uint8_t)1)
+#define SHT3x_ADDR  ((uint8_t)(0x44<<1))
+
+static void sensor_read_cb(void) {
+    uint8_t ack_err = 0;
+    uint8_t crc8,rxByte[6];
+    I2c_StartCondition();
+    ack_err += I2c_WriteByte(SHT3x_ADDR+I2C_READ);
+    if(ack_err == 0) {
+        crc8 = 0xFF;
+        ack_err += I2c_ReadByte(rxByte+0, 0);
+        crc8 = crc8_update(crc8, rxByte[0]);
+        ack_err += I2c_ReadByte(rxByte+1, 0);
+        crc8 = crc8_update(crc8, rxByte[1]);
+        ack_err += I2c_ReadByte(rxByte+2, 0);
+        if(crc8 != rxByte[2]) ack_err += 1;
+        crc8 = 0xFF;
+        ack_err += I2c_ReadByte(rxByte+3, 0);
+        crc8 = crc8_update(crc8, rxByte[3]);
+        ack_err += I2c_ReadByte(rxByte+4, 0);
+        crc8 = crc8_update(crc8, rxByte[4]);
+        ack_err += I2c_ReadByte(rxByte+5, 1);
+        if(crc8 != rxByte[5]) ack_err += 1;
+        I2c_StopCondition();
+    }
+    if(ack_err == 0) {
+        /* T = t/10-100
+         * RH = rh/10 */
+        uint16_t t = (uint32_t)1750*(((uint16_t)rxByte[0]<<8)+rxByte[1])/65535+550;
+        uint16_t rh = (uint32_t)1000*(((uint16_t)rxByte[3]<<8)+rxByte[4])/65535;
+        MODBUS_REG_Temp = t;
+        MODBUS_REG_Humi = rh;
+        MODBUS_REG_SuccCnt = 1+MODBUS_REG_SuccCnt;
+        if(gDevSt.autoReport) {
+            int i,size = 4; /* regSize = 4 */
+            uint8_t pkgSend[32];
+            pkgSend[0] = gDevSt.comAddress;
+            pkgSend[1] = 0x03;
+            pkgSend[2] = (size*2)&0xFF;
+            for(i=0; i<size; i++) {
+                uint16_t value = modbus_reg(g_reg_sensor, i);
+                pkgSend[3+i*2] = (value>>8)&0xFF;
+                pkgSend[3+i*2+1] = value&0xFF;
+            }
+            uint16_t crc = 0xFFFF;
+            for(i=0; i<size*2+3; i++) {
+                crc = crc16_update(crc, pkgSend[i]);
+            }
+            pkgSend[i] = crc&0xFF;
+            pkgSend[i+1] = (crc>>8)&0xFF;
+            com_send(pkgSend, i+2);
+        }
+    }
 }
 
+static void sensor_read(void) {
+    int ack_err = 0;
+    I2c_StartCondition();
+    ack_err += I2c_WriteByte(SHT3x_ADDR+I2C_WRITE);
+    ack_err += I2c_WriteByte(0x24);
+    ack_err += I2c_WriteByte(0x00);
+    I2c_StopCondition();
+    if(ack_err == 0) {
+        sys_task_reg_alarm(15, sensor_read_cb);
+    }
+}
+
+
+/* ################# main function #################   */
 int board_init(void) {
     /* read config */
     eeprom_init();
@@ -229,10 +285,13 @@ int board_init(void) {
     /* register event */
     sys_task_reg_timer(gDevSt.measSeconds*1000, sensor_read); /* read sens */
     sys_task_reg_event(EVENT_UART1_RECV_PKG, uart1_recv_pkg_cb); /* recv_pkg event callback */
+    sys_task_reg_event(EVENT_UART1_RECV_PKG, uart1_send_pkg_cb); /* recv_pkg event callback */
     sys_task_reg_alarm(60000, config_update_powerCnt); /* update powerCnt after power.1min */
     return 0;
 }
 
+
+/* ################# gpio-exti functions #################   */
 void gpioAExti_cb(uint8_t val) {
     try_param(val);
 }
@@ -249,6 +308,8 @@ void gpioDExti_cb(uint8_t val) {
     try_param(val);
 }
 
+
+/* ################# isr functions #################   */
 void uart1_rx_cb(uint8_t ch) {
     /* modbus: <addr> 03 <reg_addr_2> <reg_size_2> <chksum_2> */
     static uint8_t idx = 0;

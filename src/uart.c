@@ -39,16 +39,24 @@ int uart1_flush_output(void) {
     return 0;
 }
 
-int uart1_send(uint8_t *buffer, int size) {
-    if(UART1_TX_EMPTY() && (size <= UART_TX_MAXSIZE) && (size > 0)) {
+int uart1_cache_send(uint8_t *buffer, int size, uint8_t wait) {
+    if(Tx1Counter + size <= UART_TX_MAXSIZE) {
         for(int i=0; i<size; i++) {
-            Tx1Buffer[i] = buffer[i];
+            Tx1Buffer[Tx1Counter] = buffer[i];
+            Tx1Counter += 1;
         }
-        Tx1Pointer = 0;
-        Tx1Counter = size;
-        //UART1_SendData8(uart1_tx_data());
-        UART1_ITConfig(UART1_IT_TXE, ENABLE);
+        if(!wait) {
+            Tx1Pointer = 0;
+            UART1_ITConfig(UART1_IT_TXE, ENABLE);
+        }
         return size;
+    }
+    return -1;
+}
+
+int uart1_send(uint8_t *buffer, int size) {
+    if(UART1_TX_EMPTY() && (size > 0)) {
+        return uart1_cache_send(buffer, size, 0);
     }
     return -1;
 }
